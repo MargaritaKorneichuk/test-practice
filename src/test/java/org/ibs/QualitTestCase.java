@@ -3,7 +3,8 @@ package org.ibs;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
@@ -12,63 +13,49 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.Select;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
+import java.sql.*;
 import java.time.Duration;
 import java.util.List;
 
 public class QualitTestCase {
-
+    Connection connection;
     private WebDriver driver;
     private WebDriverWait wait;
     private FoodPage foodPage;
 
     @BeforeEach
-    void testsPreCondition() {
+    void testsPreCondition() throws SQLException {
         System.setProperty("webdriver.chromedriver.driver","src/test/resources/chrome.exe");
         driver = new ChromeDriver();
         driver.manage().window().maximize();
         driver.get("http://localhost:8080/food");
         wait = new WebDriverWait(driver, Duration.ofSeconds(10));
         foodPage = new FoodPage(driver, wait);
+        connection = DriverManager.getConnection("jdbc:h2:tcp://localhost:9092/mem:testdb","user","pass");
     }
-
-    @Test
-    void testAddVegetablePotato() {
+    @ParameterizedTest
+    @CsvSource({"Картофель,Овощ,false","Melotria,Овощ,true","Клубника,Фрукт,false","Mangosteen,Фрукт,true"})
+    void testAddFood(String name, String type, boolean exotic) throws SQLException {
+        String query = "SELECT COUNT(FOOD_ID) FROM FOOD WHERE FOOD_NAME = ? AND FOOD_TYPE = ? AND FOOD_EXOTIC = ?";
+        PreparedStatement preparedStatement = connection.prepareStatement(query);
+        preparedStatement.setString(1,name);
+        if (type.equals("Овощ")){
+            preparedStatement.setString(2, "VEGETABLE");
+        }else{
+            preparedStatement.setString(2, "FRUIT");
+        }
+        int exotic_code = exotic? 1:0;
+        preparedStatement.setInt(3, exotic_code);
+        ResultSet resultSet = preparedStatement.executeQuery();
+        resultSet.first();
+        int count = resultSet.getInt("COUNT(FOOD_ID)");
+        Assertions.assertEquals(0, count,"Строка уже существует");
         int initialRowCount = foodPage.getRowCount();
-        foodPage.addFood("Картофель", "Овощ", false);
+        foodPage.addFood(name, type, exotic);
         Assertions.assertEquals(initialRowCount + 1, foodPage.getRowCount(), "Строка не добавилась");
-        Assertions.assertEquals("Картофель", foodPage.getLastRowName(), "Неверное название");
-        Assertions.assertEquals("Овощ", foodPage.getLastRowType(), "Неверный тип");
-        Assertions.assertEquals("false", foodPage.getLastRowExotic(), "Неверная экзотичность");
-    }
-
-    @Test
-    void testAddVegetableMelotria() {
-        int initialRowCount = foodPage.getRowCount();
-        foodPage.addFood("Melotria", "Овощ", true);
-        Assertions.assertEquals(initialRowCount + 1, foodPage.getRowCount(), "Строка не добавилась");
-        Assertions.assertEquals("Melotria", foodPage.getLastRowName(), "Неверное название");
-        Assertions.assertEquals("Овощ", foodPage.getLastRowType(), "Неверный тип");
-        Assertions.assertEquals("true", foodPage.getLastRowExotic(), "Неверная экзотичность");
-    }
-
-    @Test
-    void testAddFruitStrawberry() {
-        int initialRowCount = foodPage.getRowCount();
-        foodPage.addFood("Клубника", "Фрукт", false);
-        Assertions.assertEquals(initialRowCount + 1, foodPage.getRowCount(), "Строка не добавилась");
-        Assertions.assertEquals("Клубника", foodPage.getLastRowName(), "Неверное название");
-        Assertions.assertEquals("Фрукт", foodPage.getLastRowType(), "Неверный тип");
-        Assertions.assertEquals("false", foodPage.getLastRowExotic(), "Неверная экзотичность");
-    }
-
-    @Test
-    void testAddFruitMangosteen() {
-        int initialRowCount = foodPage.getRowCount();
-        foodPage.addFood("Mangosteen", "Фрукт", true);
-        Assertions.assertEquals(initialRowCount + 1, foodPage.getRowCount(), "Строка не добавилась");
-        Assertions.assertEquals("Mangosteen", foodPage.getLastRowName(), "Неверное название");
-        Assertions.assertEquals("Фрукт", foodPage.getLastRowType(), "Неверный тип");
-        Assertions.assertEquals("true", foodPage.getLastRowExotic(), "Неверная экзотичность");
+        Assertions.assertEquals(name, foodPage.getLastRowName(), "Неверное название");
+        Assertions.assertEquals(type, foodPage.getLastRowType(), "Неверный тип");
+        Assertions.assertEquals(String.valueOf(exotic), foodPage.getLastRowExotic(), "Неверная экзотичность");
     }
 
     @AfterEach
