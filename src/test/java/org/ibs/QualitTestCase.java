@@ -1,122 +1,202 @@
 package org.ibs;
 
+import org.ibs.pages.FoodPage;
+import org.ibs.utils.Locators;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.Select;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.sql.*;
 import java.time.Duration;
 import java.util.List;
 
+/**
+ * Класс QualitTestCase отвечает за проверку UI страницы Список товаров.
+ * Тесты проверяют добавление овощей и фруктов,  верифицируя корректность отображения данных в таблице после добавления.
+ *  В тестах используется база данных H2 для проверки уникальности добавляемых элементов.
+ * @author Корнейчук Маргарита
+ */
 public class QualitTestCase {
     Connection connection;
     private WebDriver driver;
-    private WebDriverWait wait;
     private FoodPage foodPage;
+    private WebDriverWait webDriverWait;
 
+    /**
+     * Метод, выполняющийся перед каждым тестом. Инициализирует WebDriver,  подключается к базе данных и открывает страницу со списком продуктов.
+     * @throws SQLException если возникает ошибка при подключении к базе данных.
+     */
     @BeforeEach
     void testsPreCondition() throws SQLException {
         System.setProperty("webdriver.chromedriver.driver","src/test/resources/chrome.exe");
         driver = new ChromeDriver();
         driver.manage().window().maximize();
+        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(10));
+        driver.manage().timeouts().pageLoadTimeout(Duration.ofSeconds(10));
         driver.get("http://localhost:8080/food");
-        wait = new WebDriverWait(driver, Duration.ofSeconds(10));
-        foodPage = new FoodPage(driver, wait);
+        webDriverWait = new WebDriverWait(driver, Duration.ofSeconds(10));
+        foodPage = new FoodPage(driver);
         connection = DriverManager.getConnection("jdbc:h2:tcp://localhost:9092/mem:testdb","user","pass");
     }
+
+    /**
+     * Параметризованный тест для проверки добавления овощей.
+     * <p>
+     * Шаги выполнения:
+     * 1) Проверяется наличие записи с заданными параметрами в базе данных.
+     * 2) Запоминается начальное количество строк в таблице.
+     * 3) Нажимается кнопка "Добавить".
+     * 4) Заполняются поля "Название" и "Экзотичность".
+     * 5) Нажимается кнопка "Сохранить".
+     * 6) Проверяется, что количество строк в таблице увеличилось на 1.
+     * 7) Проверяются значения полей "Название", "Тип" и "Экзотичность" в последней строке таблицы.
+     *
+     * @param name Наименование товара.
+     * @param type Тип товара (для данного теста всегда "Овощ").
+     * @param exotic Признак экзотичности товара.
+     * @throws SQLException если возникает ошибка при работе с базой данных.
+     */
     @ParameterizedTest
-    @CsvSource({"Картофель,Овощ,false","Melotria,Овощ,true","Клубника,Фрукт,false","Mangosteen,Фрукт,true"})
-    void testAddFood(String name, String type, boolean exotic) throws SQLException {
+    @CsvSource({"Картофель,Овощ,false","Melotria,Овощ,true"})
+    void testAddVegetable(String name, String type, boolean exotic) throws SQLException {
+        // Проверка на существование записи в базе данных
         String query = "SELECT COUNT(FOOD_ID) FROM FOOD WHERE FOOD_NAME = ? AND FOOD_TYPE = ? AND FOOD_EXOTIC = ?";
         PreparedStatement preparedStatement = connection.prepareStatement(query);
         preparedStatement.setString(1,name);
-        if (type.equals("Овощ")){
-            preparedStatement.setString(2, "VEGETABLE");
-        }else{
-            preparedStatement.setString(2, "FRUIT");
-        }
+        preparedStatement.setString(2, "VEGETABLE");
         int exotic_code = exotic? 1:0;
         preparedStatement.setInt(3, exotic_code);
         ResultSet resultSet = preparedStatement.executeQuery();
         resultSet.first();
         int count = resultSet.getInt("COUNT(FOOD_ID)");
-        Assertions.assertEquals(0, count,"Строка уже существует");
-        int initialRowCount = foodPage.getRowCount();
-        foodPage.addFood(name, type, exotic);
-        Assertions.assertEquals(initialRowCount + 1, foodPage.getRowCount(), "Строка не добавилась");
-        Assertions.assertEquals(name, foodPage.getLastRowName(), "Неверное название");
-        Assertions.assertEquals(type, foodPage.getLastRowType(), "Неверный тип");
-        Assertions.assertEquals(String.valueOf(exotic), foodPage.getLastRowExotic(), "Неверная экзотичность");
-    }
 
+        //Проверка на существование записи UI
+        List<WebElement> table_rows = foodPage.getTableRows();
+        WebElement name_r, type_r, exotic_r;
+        final boolean[] exist = {false};
+        for (WebElement row:table_rows) {
+            name_r = row.findElement(Locators.FoodPage.TABLE_ROW_NAME);
+            type_r = row.findElement(Locators.FoodPage.TABLE_ROW_TYPE);
+            exotic_r = row.findElement(Locators.FoodPage.TABLE_ROW_EXOTIC);
+            if (name_r.getText().equals(name)
+                    && type_r.getText().equals(type) && exotic_r.getText().equals(String.valueOf(exotic))){
+                exist[0] = true;
+                break;
+            }
+        }
+        Assertions.assertAll("Проверки на существование строки",
+                () -> Assertions.assertFalse(exist[0], "Строка уже существует UI"),
+                () -> Assertions.assertEquals(0, count,"Строка уже существует БД"));
+
+        // Добавление товара и проверка количества строк
+        int initialRowCount = table_rows.size();
+        foodPage = foodPage.clickAddBtn()
+                .fillNameField(name)
+                .setExotic(exotic)
+                .clickSaveBtn();
+        webDriverWait.until(ExpectedConditions.elementToBeClickable(Locators.FoodPage.BTN_ADD));
+        Assertions.assertEquals(initialRowCount + 1, foodPage.getTableRows().size(), "Строка не добавилась");
+
+        // Проверка данных в последней строке таблицы
+        WebElement lastTableRow = foodPage.getTableRows().get(initialRowCount);
+        WebElement name_field = lastTableRow.findElement(Locators.FoodPage.TABLE_ROW_NAME);
+        WebElement type_field = lastTableRow.findElement(Locators.FoodPage.TABLE_ROW_TYPE);
+        WebElement exotic_field = lastTableRow.findElement(Locators.FoodPage.TABLE_ROW_EXOTIC);
+        Assertions.assertEquals(name, name_field.getText(), "Неверное название");
+        Assertions.assertEquals(type, type_field.getText(), "Неверный тип");
+        Assertions.assertEquals(String.valueOf(exotic), exotic_field.getText(), "Неверная экзотичность");
+    }
+    /**
+     * Параметризованный тест для проверки добавления фруктов. Аналогичен testAddVegetable.
+     * <p>
+     * Шаги выполнения:
+     * 1) Проверяется наличие записи с заданными параметрами в базе данных.
+     * 2) Запоминается начальное количество строк в таблице.
+     * 3) Нажимается кнопка "Добавить".
+     * 4) Заполняются поля "Название", "Тип" и "Экзотичность".
+     * 5) Нажимается кнопка "Сохранить".
+     * 6) Проверяется, что количество строк в таблице увеличилось на 1.
+     * 7) Проверяются значения полей "Название", "Тип" и "Экзотичность" в последней строке таблицы.
+     *
+     * @param name Наименование товара.
+     * @param type Тип товара (для данного теста всегда "Фрукт").
+     * @param exotic Признак экзотичности товара.
+     * @throws SQLException если возникает ошибка при работе с базой данных.
+     */
+    @ParameterizedTest
+    @CsvSource({"Клубника,Фрукт,false","Mangosteen,Фрукт,true"})
+    void testAddFruit(String name, String type, boolean exotic) throws SQLException {
+        // Проверка на существование записи в базе данных
+        String query = "SELECT COUNT(FOOD_ID) FROM FOOD WHERE FOOD_NAME = ? AND FOOD_TYPE = ? AND FOOD_EXOTIC = ?";
+        PreparedStatement preparedStatement = connection.prepareStatement(query);
+        preparedStatement.setString(1,name);
+        preparedStatement.setString(2, "FRUIT");
+        int exotic_code = exotic? 1:0;
+        preparedStatement.setInt(3, exotic_code);
+        ResultSet resultSet = preparedStatement.executeQuery();
+        resultSet.first();
+        int count = resultSet.getInt("COUNT(FOOD_ID)");
+
+        //Проверка на существование записи UI
+        List<WebElement> table_rows = foodPage.getTableRows();
+        WebElement name_r, type_r, exotic_r;
+        final boolean[] exist = {false};
+        for (WebElement row:table_rows) {
+            name_r = row.findElement(Locators.FoodPage.TABLE_ROW_NAME);
+            type_r = row.findElement(Locators.FoodPage.TABLE_ROW_TYPE);
+            exotic_r = row.findElement(Locators.FoodPage.TABLE_ROW_EXOTIC);
+            if (name_r.getText().equals(name)
+                    && type_r.getText().equals(type) && exotic_r.getText().equals(String.valueOf(exotic))){
+                exist[0] = true;
+                break;
+            }
+        }
+        Assertions.assertAll("Проверки на существование строки",
+                () -> Assertions.assertFalse(exist[0],"Строка уже существует UI"),
+                () -> Assertions.assertEquals(0, count,"Строка уже существует БД"));
+
+
+        // Добавление товара и проверка количества строк
+        int initialRowCount = foodPage.getTableRows().size();
+        foodPage = foodPage.clickAddBtn()
+                .fillNameField(name)
+                .setType(type)
+                .setExotic(exotic)
+                .clickSaveBtn();
+        webDriverWait.until(ExpectedConditions.elementToBeClickable(Locators.FoodPage.BTN_ADD));
+        Assertions.assertEquals(initialRowCount + 1, foodPage.getTableRows().size(), "Строка не добавилась");
+
+        // Проверка данных в последней строке таблицы
+        WebElement lastTableRow = foodPage.getTableRows().get(initialRowCount);
+        WebElement name_field = lastTableRow.findElement(Locators.FoodPage.TABLE_ROW_NAME);
+        WebElement type_field = lastTableRow.findElement(Locators.FoodPage.TABLE_ROW_TYPE);
+        WebElement exotic_field = lastTableRow.findElement(Locators.FoodPage.TABLE_ROW_EXOTIC);
+        Assertions.assertEquals(name, name_field.getText(), "Неверное название");
+        Assertions.assertEquals(type, type_field.getText(), "Неверный тип");
+        Assertions.assertEquals(String.valueOf(exotic), exotic_field.getText(), "Неверная экзотичность");
+    }
+    /**
+     * Метод, выполняющийся после каждого теста. Сбрасывает данные на странице, закрывает браузер и соединение с БД.
+     */
     @AfterEach
     void postCondition() {
-        wait.until(ExpectedConditions.elementToBeClickable(foodPage.getNavbarDropDown()));
-        foodPage.getNavbarDropDown().click();
-        wait.until(ExpectedConditions.elementToBeClickable(foodPage.getResetButton()));
-        foodPage.getResetButton().click();
-        wait.until(ExpectedConditions.numberOfElementsToBe(By.xpath("//table/tbody/tr"), 4)); //Более точное ожидание
-        Assertions.assertEquals(4, foodPage.getRowCount(), "Ошибка при сбросе данных");
+        foodPage.clickNavBarDropDown().clickResetBtn();
+        Assertions.assertEquals(4, foodPage.getTableRows().size(), "Ошибка при сбросе данных");
         driver.quit();
-    }
-
-
-    static class FoodPage {
-        private final WebDriver driver;
-        private final WebDriverWait wait;
-
-        FoodPage(WebDriver driver, WebDriverWait wait) {
-            this.driver = driver;
-            this.wait = wait;
-        }
-
-        WebElement getBtnAdd() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//div[@class = \"btn-grou mt-2 mb-2\"]/button")))); }
-        WebElement getBtnSave() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//button[@id=\"save\"]")))); }
-        WebElement getInputName() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//input[@id=\"name\"]")))); }
-        WebElement getSelectType() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//select[@id=\"type\"]")))); }
-        WebElement getInputExotic() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//input[@id=\"exotic\"]")))); }
-        List<WebElement> getTableRows() { return driver.findElements(By.xpath("//table/tbody/tr")); }
-        WebElement getNavbarDropDown() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//a[@id=\"navbarDropdown\"]"))));}
-        WebElement getResetButton() { return wait.until(ExpectedConditions.elementToBeClickable(driver.findElement(By.xpath("//a[@id=\"reset\"]"))));}
-
-
-        int getRowCount() {
-            return getTableRows().size();
-        }
-
-        String getLastRowName() {
-            List<WebElement> rows = getTableRows();
-            return rows.get(rows.size() - 1).findElement(By.xpath("./td[1]")).getText();
-        }
-
-        String getLastRowType() {
-            List<WebElement> rows = getTableRows();
-            return rows.get(rows.size() - 1).findElement(By.xpath("./td[2]")).getText();
-        }
-
-        String getLastRowExotic() {
-            List<WebElement> rows = getTableRows();
-            return rows.get(rows.size() - 1).findElement(By.xpath("./td[3]")).getText();
-        }
-
-        void addFood(String name, String type, boolean exotic) {
-            getBtnAdd().click();
-            getInputName().sendKeys(name);
-            new Select(getSelectType()).selectByVisibleText(type);
-            if (exotic) {
-                getInputExotic().click();
+        try {
+            if (connection != null) {
+                connection.close();
             }
-            getBtnSave().click();
-            wait.until(ExpectedConditions.numberOfElementsToBeMoreThan(By.xpath("//table/tbody/tr"), getRowCount()));
+        } catch (SQLException e) {
+            e.printStackTrace();
         }
     }
 }
