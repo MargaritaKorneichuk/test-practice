@@ -18,12 +18,12 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Класс QualitTestCase отвечает за проверку UI страницы Список товаров.
+ * Класс QualitUITestCase отвечает за проверку UI страницы Список товаров.
  * Тесты проверяют добавление овощей и фруктов,  верифицируя корректность отображения данных в таблице после добавления.
  *  В тестах используется база данных H2 для проверки уникальности добавляемых элементов.
  * @author Корнейчук Маргарита
  */
-public class QualitTestCase {
+public class QualitUITestCase {
     Connection connection;
     private WebDriver driver;
     private FoodPage foodPage;
